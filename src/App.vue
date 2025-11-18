@@ -434,7 +434,7 @@ function initEmbedModeFromUrl() {
   const isMuted =
     mutedParam === "1" || mutedParam === "true" || mutedParam === "yes";
 
-  iframeSrc.value = `https://www.youtube.com/embed/${encodeURIComponent(
+  iframeSrc.value = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(
     mainVideoId
   )}?autoplay=1&controls=0&rel=0&mute=${isMuted ? 1 : 0}&playsinline=1&loop=1&playlist=${encodeURIComponent(
     finalPlaylistParam

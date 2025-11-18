@@ -12,9 +12,9 @@
       allowfullscreen
     ></iframe>
 
-    <!-- Kiosk green countdown -->
+    <!-- Kiosk green countdown (optional) -->
     <div
-      v-if="totalSeconds > 0"
+      v-if="totalSeconds > 0 && showDurationEmbed"
       class="pointer-events-none absolute inset-0 flex items-center justify-center z-10"
     >
       <div
@@ -84,7 +84,7 @@
               Playlist
             </label>
             <p class="text-[11px] text-slate-500 mb-1">
-              Paste YouTube URLs or IDs. Duration auto-fills when you leave the field. You can tweak
+              Paste YouTube URLs or IDs. Duration auto-fills when you leave the field empty per row. <br />You can tweak
               durations manually afterwards.
             </p>
 
@@ -113,7 +113,7 @@
                         type="text"
                         class="w-full rounded-lg border border-slate-700/80 bg-slate-950/80 px-2 py-1 text-[11px] outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/60"
                         placeholder="YouTube URL or ID"
-                        @change="onVideoFieldBlur(item, idx)"
+                        @change="onVideoFieldBlur(item)"
                       />
                     </td>
                     <td class="px-3 py-1.5 align-top">
@@ -148,7 +148,7 @@
                 ➕ Add video
               </button>
               <div class="flex flex-wrap gap-2">
-                <span>{{ playlist.length }} video(s)</span>
+                <span>{{ playlist.length }} {{ playlist.length === 1 ? 'video' : 'videos' }}</span>
                 <span>•</span>
                 <span>With duration: {{ videosWithDuration }}</span>
                 <span>•</span>
@@ -221,21 +221,57 @@
           </div>
         </div>
 
-        <!-- Right: preview -->
+        <!-- Right: preview(s) -->
         <div class="space-y-2">
           <p class="text-[11px] uppercase tracking-[0.16em] text-slate-500">
-            Preview (first video)
+            Preview
           </p>
+
+          <!-- Always show the FIRST video big -->
           <div
+            v-if="firstPreviewId"
             class="aspect-video w-full overflow-hidden rounded-2xl border border-slate-800/90 bg-black/80"
           >
             <iframe
-              v-if="previewVideoId"
               class="h-full w-full border-0"
-              :src="previewSrc"
+              :src="`https://www.youtube.com/embed/${encodeURIComponent(firstPreviewId)}?autoplay=0&controls=1&rel=0`"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowfullscreen
-            ></iframe>
+                allowfullscreen
+              ></iframe>
+              </div>
+
+              <!-- Placeholder when no video is selected -->
+              <div
+              v-else
+              class="aspect-video w-full overflow-hidden rounded-2xl border border-slate-800/90 bg-slate-950/80 flex items-center justify-center"
+              >
+              <div class="text-center text-slate-400">
+                <div class="text-4xl mb-2">📹</div>
+                <p class="text-sm">No video selected</p>
+                <p class="text-xs text-slate-500 mt-1">Add a video to see preview</p>
+              </div>
+              </div>
+
+              <!-- Remaining playlist videos preview grid -->
+          <div v-if="otherPreviewIds.length > 0" class="space-y-2">
+            <p class="text-[11px] text-slate-500">
+              Playlist previews ({{ otherPreviewIds.length }} more {{ otherPreviewIds.length === 1 ? 'video' : 'videos' }})
+            </p>
+
+            <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+              <div
+                v-for="(vid, idx) in otherPreviewIds"
+                :key="vid + '-' + idx"
+                class="aspect-video overflow-hidden rounded-xl border border-slate-800/80 bg-black/80"
+              >
+                <iframe
+                  class="h-full w-full border-0"
+                  :src="`https://www.youtube.com/embed/${encodeURIComponent(vid)}?autoplay=0&controls=0&rel=0`"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowfullscreen
+                ></iframe>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -378,10 +414,26 @@ function getYoutubeDuration(videoId) {
   );
 }
 
+async function computeTotalDurationFromPlaylist(ids) {
+  let total = 0;
+  for (const id of ids) {
+    try {
+      const sec = await getYoutubeDuration(id);
+      if (sec && !Number.isNaN(sec)) {
+        total += sec;
+      }
+    } catch (e) {
+      console.error("Failed to get duration for", id, e);
+    }
+  }
+  return total;
+}
+
 const embedMode = ref(false);
 const iframeSrc = ref("");
 const totalSeconds = ref(0);
 const remaining = ref(0);
+const showDurationEmbed = ref(true);
 let countdownHandle = null;
 
 const formattedRemaining = computed(() => formatSeconds(remaining.value));
@@ -405,15 +457,23 @@ function startCountdown(seconds) {
   }, 1000);
 }
 
-function initEmbedModeFromUrl() {
+async function initEmbedModeFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const qsVideoId = params.get("videoId");
   const qsVideoUrl = params.get("videoUrl");
   const qsPlaylist = params.get("playlist");
   const mutedParam = params.get("muted");
   const secondsParam = params.get("seconds");
+  const showDurationParam = params.get("showDuration");
+
   const hasEmbedParams = qsVideoId || qsVideoUrl || qsPlaylist;
   if (!hasEmbedParams) return false;
+
+  showDurationEmbed.value = !(
+    showDurationParam === "0" ||
+    showDurationParam === "false" ||
+    showDurationParam === "no"
+  );
 
   let playlistIds = [];
   if (qsPlaylist) {
@@ -422,6 +482,7 @@ function initEmbedModeFromUrl() {
       .map((x) => x.trim())
       .filter((x) => !!x);
   }
+
   let mainIdCandidate = qsVideoId || extractVideoId(qsVideoUrl);
   let mainVideoId = extractVideoId(mainIdCandidate);
   if (!mainVideoId && playlistIds.length > 0) {
@@ -434,14 +495,22 @@ function initEmbedModeFromUrl() {
   const isMuted =
     mutedParam === "1" || mutedParam === "true" || mutedParam === "yes";
 
-  iframeSrc.value = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(
+  iframeSrc.value = `https://www.youtube.com/embed/${encodeURIComponent(
     mainVideoId
   )}?autoplay=1&controls=0&rel=0&mute=${isMuted ? 1 : 0}&playsinline=1&loop=1&playlist=${encodeURIComponent(
     finalPlaylistParam
   )}`;
 
-  const secondsTotal = parseInt(secondsParam || "0", 10) || 0;
-  if (secondsTotal > 0) {
+  let secondsTotal = parseInt(secondsParam || "0", 10) || 0;
+
+  if (!secondsParam && playlistIds.length > 0 && showDurationEmbed.value) {
+    const cleanedIds = playlistIds
+      .map((id) => extractVideoId(id))
+      .filter(Boolean);
+    secondsTotal = await computeTotalDurationFromPlaylist(cleanedIds);
+  }
+
+  if (secondsTotal > 0 && showDurationEmbed.value) {
     startCountdown(secondsTotal);
   }
 
@@ -463,22 +532,26 @@ const videosWithDuration = computed(
   () => playlist.filter((p) => parseDurationToSeconds(p.duration) > 0).length
 );
 
-const previewVideoId = computed(() => {
-  const first = playlist.find((p) => extractVideoId(p.raw));
-  return first ? extractVideoId(first.raw) : extractVideoId(singleInput.value);
+const previewIds = computed(() => {
+  const ids = playlist
+    .map((p) => extractVideoId(p.raw))
+    .filter((id) => !!id);
+  if (!ids.length) {
+    const single = extractVideoId(singleInput.value);
+    return single ? [single] : [];
+  }
+  return ids;
 });
-const previewSrc = computed(() => {
-  if (!previewVideoId.value) return "";
-  return `https://www.youtube.com/embed/${encodeURIComponent(
-    previewVideoId.value
-  )}?autoplay=0&controls=1&rel=0`;
-});
+const firstPreviewId = computed(() => previewIds.value[0] || null);
+const otherPreviewIds = computed(() =>
+  previewIds.value.length > 1 ? previewIds.value.slice(1) : []
+);
 
 function recalcSummary() {
   void totalSecondsPlaylist.value;
 }
 
-async function onVideoFieldBlur(item, idx) {
+async function onVideoFieldBlur(item) {
   const id = extractVideoId(item.raw);
   if (!id) return;
   try {
@@ -550,7 +623,6 @@ function generateUrl() {
   const firstVideoId = ids[0];
   if (firstVideoId) params.set("videoId", firstVideoId);
   if (ids.length > 0) params.set("playlist", ids.join(","));
-
   params.set("muted", "0");
 
   const fullUrl = buildFullViteUrl(params.toString());
@@ -575,8 +647,8 @@ async function copyUrl() {
   }
 }
 
-onMounted(() => {
-  const handled = initEmbedModeFromUrl();
+onMounted(async () => {
+  const handled = await initEmbedModeFromUrl();
   if (!handled) {
     embedMode.value = false;
   }
